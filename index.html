@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f6f6f2" />
+    <meta name="description" content="動画をブラウザ内でトリミング・圧縮。ファイルはアップロードされません。" />
+    <title>clip — 動画を軽く</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="clip ホーム"><span class="brand-mark">c</span><span>clip</span></a>
+        <div class="privacy"><span class="privacy-dot"></span>動画はこの端末内で処理されます</div>
+      </header>
+
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">VIDEO TOOL / 01</p>
+        <h1 id="page-title">動画を、<span>軽く。</span></h1>
+        <p class="lead">必要なところだけ残して、Discordで送りやすいサイズに。</p>
+      </section>
+
+      <section class="workspace" aria-label="動画の圧縮">
+        <div class="step-heading"><span class="step-number">01</span><h2>動画を選ぶ</h2><span class="step-hint">MP4・MOV・WebM など</span></div>
+        <label class="dropzone" id="dropzone" for="file-input">
+          <input id="file-input" type="file" accept="video/*,.mkv,.avi,.mov,.mp4,.webm" />
+          <span class="upload-icon" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none"><path d="M16 21V5m0 0L9.5 11.5M16 5l6.5 6.5M6 20v6h20v-6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <span class="drop-title">動画をここにドロップ</span>
+          <span class="drop-subtitle">または <span class="browse-link">ファイルを選択</span></span>
+        </label>
+
+        <div class="editor hidden" id="editor">
+          <div class="file-row">
+            <div class="file-badge" aria-hidden="true">▶</div>
+            <div class="file-meta"><strong id="file-name">video.mp4</strong><span id="file-details">—</span></div>
+            <button class="text-button" id="change-file" type="button">変更</button>
+          </div>
+
+          <div class="preview-wrap">
+            <video id="preview" playsinline controls preload="metadata"></video>
+            <div class="preview-placeholder" id="preview-placeholder">動画を読み込んでいます…</div>
+          </div>
+
+          <div class="step-heading trim-heading"><span class="step-number">02</span><h2>使う範囲を選ぶ</h2><span class="step-hint">左右のハンドルで調整</span></div>
+          <div class="trim-panel">
+            <div class="range-labels"><span>開始 <strong id="start-label">00:00</strong></span><span>終了 <strong id="end-label">00:00</strong></span></div>
+            <div class="range-control" id="range-control">
+              <div class="range-track"><div class="range-selection" id="range-selection"></div></div>
+              <input id="start-range" aria-label="開始位置" type="range" min="0" max="1000" value="0" />
+              <input id="end-range" aria-label="終了位置" type="range" min="0" max="1000" value="1000" />
+            </div>
+            <div class="time-fields">
+              <label>開始 <input id="start-time" type="number" min="0" step="0.1" value="0" inputmode="decimal" /><span>秒</span></label>
+              <button class="set-time" id="set-start" type="button">現在位置を指定</button>
+              <span class="time-separator">→</span>
+              <label>終了 <input id="end-time" type="number" min="0" step="0.1" value="0" inputmode="decimal" /><span>秒</span></label>
+              <button class="set-time" id="set-end" type="button">現在位置を指定</button>
+            </div>
+          </div>
+
+          <div class="step-heading compress-heading"><span class="step-number">03</span><h2>圧縮して保存</h2></div>
+          <div class="settings-row">
+            <label class="setting-label" for="size-target">目標サイズ</label>
+            <div class="target-control"><input id="size-target" type="number" min="1" max="20" step="0.5" value="20" /><span>MB</span></div>
+            <span class="settings-note">Discord向けに余裕をもって仕上げます</span>
+          </div>
+          <div class="settings-row quality-row">
+            <label class="setting-label" for="resolution">画質の上限</label>
+            <select id="resolution"><option value="720">720p（標準）</option><option value="480">480p（小さめ）</option><option value="360">360p（さらに小さめ）</option></select>
+            <span class="settings-note">サイズが大きい場合は自動で再調整</span>
+          </div>
+
+          <button class="compress-button" id="compress-button" type="button"><span class="button-icon">↘</span><span id="compress-button-label">圧縮をはじめる</span></button>
+          <div class="progress-area hidden" id="progress-area" aria-live="polite">
+            <div class="progress-copy"><span id="progress-message">FFmpegを準備しています</span><span id="progress-percent">0%</span></div>
+            <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+            <p class="progress-note">初回は圧縮エンジンの読み込みに少し時間がかかります</p>
+          </div>
+          <div class="result hidden" id="result" aria-live="polite">
+            <div class="result-icon">✓</div><div class="result-text"><strong id="result-title">圧縮できました</strong><span id="result-detail">—</span></div>
+            <a class="download-button" id="download-link" download="clip.mp4" href="#">ダウンロード <span>↓</span></a>
+          </div>
+          <p class="error-message hidden" id="error-message" role="alert"></p>
+        </div>
+      </section>
+
+      <footer class="footer"><span>ローカル処理で、動画をアップロードしません。</span><span>FFmpeg WebAssembly</span></footer>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

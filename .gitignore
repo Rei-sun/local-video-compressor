@@ -1,0 +1,12 @@
+dist/
+outputs/
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+*.m4v
+*.wmv
+*.mpeg
+*.mpg
+*.3gp
