@@ -10,12 +10,16 @@ const endRange = $('end-range');
 const startTime = $('start-time');
 const endTime = $('end-time');
 const rangeSelection = $('range-selection');
-const ffmpeg = new FFmpeg();
 const ffmpegMessages = [];
-ffmpeg.on('log', ({ message }) => {
-  ffmpegMessages.push(message);
-  if (ffmpegMessages.length > 30) ffmpegMessages.shift();
-});
+function createFFmpeg() {
+  const instance = new FFmpeg();
+  instance.on('log', ({ message }) => {
+    ffmpegMessages.push(message);
+    if (ffmpegMessages.length > 30) ffmpegMessages.shift();
+  });
+  return instance;
+}
+let ffmpeg = createFFmpeg();
 
 let sourceFile = null;
 let sourceUrl = null;
@@ -23,6 +27,7 @@ let outputUrl = null;
 let duration = 0;
 let loaded = false;
 let compressing = false;
+let cancelRequested = false;
 let progressValue = 0;
 
 const formatTime = (seconds) => {
@@ -35,6 +40,24 @@ const formatTime = (seconds) => {
 const formatBytes = (bytes) => bytes < 1024 * 1024
   ? `${(bytes / 1024).toFixed(0)} KB`
   : `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+
+function syncPlaybackControls() {
+  if (!duration) return;
+  const start = Number(startTime.value) || 0;
+  const end = Number(endTime.value) || duration;
+  const current = Math.min(end, Math.max(start, Number(preview.currentTime) || start));
+  const range = $('playback-range');
+  range.value = String(Math.round((current - start) / Math.max(0.2, end - start) * 1000));
+  $('playback-current').textContent = formatTime(current);
+  $('playback-end').textContent = formatTime(end);
+  const playing = !preview.paused && !preview.ended;
+  $('play-toggle').textContent = playing ? '❚❚' : '▶';
+  $('play-toggle').setAttribute('aria-label', playing ? '一時停止' : '再生');
+  $('play-toggle').title = playing ? '一時停止' : '再生';
+  $('mute-toggle').textContent = preview.muted ? '消音中' : '音声';
+  $('mute-toggle').setAttribute('aria-label', preview.muted ? 'ミュート解除' : 'ミュート');
+  $('mute-toggle').title = preview.muted ? 'ミュート解除' : 'ミュート';
+}
 
 function showError(message) {
   $('error-message').textContent = message;
@@ -64,6 +87,8 @@ function updateTrimUi(from = 'range') {
   rangeSelection.style.left = `${left}%`;
   rangeSelection.style.width = `${right - left}%`;
   if (from === 'start-range' || from === 'end-range') preview.currentTime = from === 'start-range' ? start : end;
+  if (preview.currentTime < start || preview.currentTime > end) preview.currentTime = start;
+  syncPlaybackControls();
 }
 
 function cleanResult() {
@@ -124,6 +149,42 @@ endTime.addEventListener('change', () => updateTrimUi('end-time'));
 $('set-start').addEventListener('click', () => { startTime.value = preview.currentTime; updateTrimUi('start-time'); });
 $('set-end').addEventListener('click', () => { endTime.value = preview.currentTime; updateTrimUi('end-time'); });
 
+$('play-toggle').addEventListener('click', () => {
+  if (!preview.paused) {
+    preview.pause();
+    return;
+  }
+  const start = Number(startTime.value) || 0;
+  const end = Number(endTime.value) || duration;
+  if (preview.currentTime < start || preview.currentTime >= end) preview.currentTime = start;
+  preview.play().catch(() => showError('動画を再生できませんでした。'));
+});
+$('playback-range').addEventListener('input', (event) => {
+  const start = Number(startTime.value) || 0;
+  const end = Number(endTime.value) || duration;
+  preview.currentTime = start + (end - start) * Number(event.target.value) / 1000;
+  syncPlaybackControls();
+});
+$('mute-toggle').addEventListener('click', () => {
+  preview.muted = !preview.muted;
+  syncPlaybackControls();
+});
+preview.addEventListener('play', () => {
+  const start = Number(startTime.value) || 0;
+  const end = Number(endTime.value) || duration;
+  if (preview.currentTime < start || preview.currentTime >= end) preview.currentTime = start;
+  syncPlaybackControls();
+});
+preview.addEventListener('pause', syncPlaybackControls);
+preview.addEventListener('timeupdate', () => {
+  const end = Number(endTime.value) || duration;
+  if (!preview.paused && preview.currentTime >= end) {
+    preview.pause();
+    preview.currentTime = end;
+  }
+  syncPlaybackControls();
+});
+
 function setProgress(value, message) {
   progressValue = Math.max(progressValue, Math.min(99, value));
   $('progress-fill').style.width = `${progressValue}%`;
@@ -133,9 +194,19 @@ function setProgress(value, message) {
 
 function setBusy(busy) {
   compressing = busy;
-  $('compress-button').disabled = busy;
+  $('compress-button').disabled = busy && cancelRequested;
   $('progress-area').classList.toggle('hidden', !busy);
-  $('compress-button-label').textContent = busy ? '処理しています…' : '圧縮をはじめる';
+  $('compress-button-label').textContent = busy ? '圧縮をキャンセル' : '圧縮をはじめる';
+  $('compress-button').classList.toggle('cancel-mode', busy);
+}
+
+function cancelCompression() {
+  if (!compressing || cancelRequested) return;
+  cancelRequested = true;
+  $('compress-button').disabled = true;
+  $('compress-button-label').textContent = 'キャンセルしています…';
+  ffmpeg.terminate();
+  loaded = false;
 }
 
 async function ensureFFmpeg() {
@@ -226,12 +297,19 @@ async function compress() {
     $('result').classList.remove('hidden');
     setProgress(100, '完了しました');
   } catch (error) {
-    console.error(error);
-    showError(error?.message || '圧縮に失敗しました。別の動画でお試しください。');
+    if (!cancelRequested) {
+      console.error(error);
+      showError(error?.message || '圧縮に失敗しました。別の動画でお試しください。');
+    }
   } finally {
     if (loaded) {
       if (inputName) { try { await ffmpeg.deleteFile(inputName); } catch { /* already removed */ } }
       try { await ffmpeg.deleteFile(outputName); } catch { /* already removed */ }
+    }
+    if (cancelRequested) {
+      ffmpeg = createFFmpeg();
+      loaded = false;
+      cancelRequested = false;
     }
     setBusy(false);
     $('progress-fill').style.width = '100%';
@@ -239,7 +317,10 @@ async function compress() {
   }
 }
 
-$('compress-button').addEventListener('click', compress);
+$('compress-button').addEventListener('click', () => {
+  if (compressing) cancelCompression();
+  else compress();
+});
 window.addEventListener('beforeunload', () => {
   if (sourceUrl) URL.revokeObjectURL(sourceUrl);
   if (outputUrl) URL.revokeObjectURL(outputUrl);
